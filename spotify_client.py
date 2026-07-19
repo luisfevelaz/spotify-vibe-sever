@@ -7,6 +7,8 @@ quota approval Spotify isn't granting to new apps. Top tracks (real
 listening history) is what we build the vibe from.
 """
 
+from typing import Optional
+
 import httpx
 from fastapi import HTTPException
 
@@ -19,7 +21,7 @@ DEFAULT_TIME_RANGE = "short_term"  # ~4 weeks, per CLAUDE.md
 async def get_top_tracks(
     access_token: str, time_range: str = DEFAULT_TIME_RANGE, limit: int = 20
 ) -> list[dict]:
-    """Return the user's top tracks as a list of {name, artists} dicts."""
+    """Return the user's top tracks as a list of {name, artists, albumArt} dicts."""
     if time_range not in VALID_TIME_RANGES:
         raise ValueError(f"Invalid time_range: {time_range}")
 
@@ -40,6 +42,12 @@ async def get_top_tracks(
         {
             "name": track["name"],
             "artists": [artist["name"] for artist in track["artists"]],
+            "albumArt": _smallest_image(track["album"]["images"]),
         }
         for track in items
     ]
+
+
+def _smallest_image(images: list[dict]) -> Optional[str]:
+    """Spotify returns album images largest-first; the smallest is enough for a list thumbnail."""
+    return images[-1]["url"] if images else None

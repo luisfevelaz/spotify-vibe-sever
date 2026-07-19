@@ -9,7 +9,7 @@ import secrets
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 
 router = APIRouter()
 
@@ -78,3 +78,25 @@ async def spotify_callback(code: str, state: str):
         raise HTTPException(status_code=502, detail="Spotify token exchange failed")
 
     return response.json()
+
+
+@router.post("/auth/spotify/refresh")
+async def spotify_refresh(refresh_token: str = Body(..., embed=True)):
+    """Exchange a refresh token for a new access token (PKCE public-client refresh — no client_secret)."""
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            SPOTIFY_TOKEN_URL,
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": SPOTIFY_CLIENT_ID,
+            },
+        )
+
+    if response.status_code != 200:
+        raise HTTPException(status_code=401, detail="Spotify token refresh failed")
+
+    data = response.json()
+    # Spotify doesn't always rotate the refresh token; keep the old one if it's absent.
+    data.setdefault("refresh_token", refresh_token)
+    return data

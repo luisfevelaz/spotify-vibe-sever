@@ -52,6 +52,6 @@ async def get_vibe_endpoint(
     tracks = await spotify_client.get_top_tracks(access_token, time_range)
     rate_limit.record_request(user_id)
 
-    result = {"vibe": vibe.get_vibe(tracks), "tracks": tracks}
+    result = {**vibe.get_vibe(tracks), "tracks": tracks}
     cache.set(user_id, time_range, result)
     return result

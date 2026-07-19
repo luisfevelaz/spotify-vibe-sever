@@ -16,7 +16,12 @@ import os
 from groq import Groq
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
-FALLBACK_VIBE = "Eclectic Mix"
+
+FALLBACK_RESULT = {
+    "vibe": "Eclectic Mix",
+    "description": "A blend of sounds that doesn't settle into just one lane.",
+    "tags": ["Eclectic", "Mixed"],
+}
 
 # On Groq's 0-2 scale: high enough to push past generic/flat phrasing
 # toward genuinely creative-dramatic-funny output, not so high that
@@ -34,9 +39,13 @@ def build_prompt(tracks: list[dict]) -> str:
     return (
         "Here are someone's most-listened-to tracks:\n"
         f"{track_lines}\n\n"
-        "Describe their music vibe in 1-10 words. The result must be "
-        "creative, dramatic, artistic, and/or funny — avoid generic, flat "
-        "descriptions."
+        "Describe their music vibe as JSON with three fields:\n"
+        '- "vibe": 1-10 words, creative, dramatic, artistic, and/or funny — '
+        "avoid generic, flat descriptions.\n"
+        '- "description": one supporting sentence (under 25 words) that '
+        "expands on the vibe with evocative, sensory detail.\n"
+        '- "tags": 2-4 short genre or mood descriptor words (1-2 words each, '
+        "Title Case, no punctuation)."
     )
 
 
@@ -49,14 +58,18 @@ JSON_OBJECT_MODE = {"type": "json_object"}
 
 def call_groq(
     prompt: str, temperature: float = DEFAULT_TEMPERATURE, timeout: float = 10.0
-) -> str:
-    """Call Groq, expecting a {"vibe": "..."} JSON object. Returns the raw vibe string."""
+) -> dict:
+    """Call Groq, expecting a {"vibe", "description", "tags"} JSON object."""
     response = _client.chat.completions.create(
         model=GROQ_MODEL,
         messages=[
             {
                 "role": "system",
-                "content": 'Respond with a single JSON object of the exact form {"vibe": "..."} and nothing else.',
+                "content": (
+                    'Respond with a single JSON object of the exact form '
+                    '{"vibe": "...", "description": "...", "tags": ["...", "..."]} '
+                    "and nothing else."
+                ),
             },
             {"role": "user", "content": prompt},
         ],
@@ -64,12 +77,13 @@ def call_groq(
         temperature=temperature,
         timeout=timeout,
     )
-    content = json.loads(response.choices[0].message.content)
-    return content["vibe"]
+    return json.loads(response.choices[0].message.content)
 
 
-def validate(vibe: str) -> bool:
+def _validate_vibe(vibe: object) -> bool:
     """1-10 words, no trailing punctuation, non-empty."""
+    if not isinstance(vibe, str):
+        return False
     vibe = vibe.strip()
     if not vibe:
         return False
@@ -79,20 +93,42 @@ def validate(vibe: str) -> bool:
     return 1 <= word_count <= 10
 
 
-def get_vibe(tracks: list[dict]) -> str:
+def validate(result: dict) -> bool:
+    """vibe passes _validate_vibe; description is a non-empty sentence; 2-4 short tags."""
+    if not _validate_vibe(result.get("vibe")):
+        return False
+
+    description = result.get("description")
+    if not isinstance(description, str) or not description.strip():
+        return False
+
+    tags = result.get("tags")
+    if not isinstance(tags, list) or not (2 <= len(tags) <= 4):
+        return False
+    if not all(isinstance(t, str) and t.strip() and len(t.split()) <= 2 for t in tags):
+        return False
+
+    return True
+
+
+def get_vibe(tracks: list[dict]) -> dict:
     """
     Build the prompt, call Groq, validate the result. Retry once on
-    invalid output; fall back to FALLBACK_VIBE if it fails twice or the
+    invalid output; fall back to FALLBACK_RESULT if it fails twice or the
     call errors/times out.
     """
     prompt = build_prompt(tracks)
 
     for _ in range(2):
         try:
-            vibe = call_groq(prompt)
+            result = call_groq(prompt)
         except Exception:
             continue
-        if validate(vibe):
-            return vibe.strip()
+        if validate(result):
+            return {
+                "vibe": result["vibe"].strip(),
+                "description": result["description"].strip(),
+                "tags": [t.strip() for t in result["tags"]],
+            }
 
-    return FALLBACK_VIBE
+    return FALLBACK_RESULT
